@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>물리 미사일 궤적 및 충격 시뮬레이터</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        h1 {
+            margin-bottom: 20px;
+            color: #00e676;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: 100%;
+            max-width: 1000px;
+        }
+        .canvas-container {
+            position: relative;
+            background-color: #1e1e1e;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 450px;
+        }
+        .controls {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            border: 1px solid #333;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        label {
+            font-weight: bold;
+            font-size: 0.9rem;
+            color: #bbb;
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        input[type="range"] {
+            flex-grow: 1;
+            accent-color: #00e676;
+        }
+        .value-display {
+            min-width: 60px;
+            font-weight: bold;
+            color: #00e676;
+        }
+        .button-group {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: center;
+            margin-top: 10px;
+        }
+        button {
+            background-color: #00e676;
+            color: #121212;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1rem;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        button:hover {
+            background-color: #00c853;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        .results {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            text-align: center;
+        }
+        .result-card {
+            background-color: #2a2a2a;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #00e676;
+        }
+        .result-card.warning {
+            border-left-color: #ff5252;
+        }
+        .result-title {
+            font-size: 0.85rem;
+            color: #aaa;
+            margin-bottom: 5px;
+        }
+        .result-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🚀 타격 시뮬레이터 (목표: 10,000 km)</h1>
+
+    <div class="container">
+        <div class="canvas-container">
+            <canvas id="simCanvas" width="1000" height="450"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="massInput">미사일 무게 (10 ~ 100 톤)</label>
+                <div class="slider-container">
+                    <input type="range" id="massInput" min="10" max="100" value="50" step="1">
+                    <span class="value-display" id="massVal">50 톤</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label for="speedInput">종말 재입입/충돌 속도 (마하 1 ~ 25)</label>
+                <div class="slider-container">
+                    <input type="range" id="speedInput" min="1" max="25" value="10" step="0.5">
+                    <span class="value-display" id="speedVal">마하 10</span>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button id="fireBtn">미사일 발사</button>
+            </div>
+        </div>
+
+        <div class="results">
+            <div class="result-card">
+                <div class="result-title">충돌 속도 (m/s)</div>
+                <div class="result-value" id="resSpeed">-</div>
+            </div>
+            <div class="result-card">
+                <div class="result-title">운동 에너지 (Joules)</div>
+                <div class="result-value" id="resEnergy">-</div>
+            </div>
+            <div class="result-card warning">
+                <div class="result-title">예상 땅꺼짐 깊이 (Crater Depth)</div>
+                <div class="result-value" id="resDepth">-</div>
+            </div>
+            <div class="result-card warning">
+                <div class="result-title">예상 땅꺼짐 반경 (Crater Radius)</div>
+                <div class="result-value" id="resRadius">-</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 슬라이더 요소
+        const massInput = document.getElementById('massInput');
+        const speedInput = document.getElementById('speedInput');
+        const massVal = document.getElementById('massVal');
+        const speedVal = document.getElementById('speedVal');
+        const fireBtn = document.getElementById('fireBtn');
+
+        // 결과 표시 요소
+        const resSpeed = document.getElementById('resSpeed');
+        const resEnergy = document.getElementById('resEnergy');
+        const resDepth = document.getElementById('resDepth');
+        const resRadius = document.getElementById('resRadius');
+
+        // 물리 상수 및 시뮬레이션 설정
+        const TARGET_DISTANCE_KM = 10000; // 10,000 km
+        const MACH_1_IN_MS = 340; // 1 마하 = 340 m/s
+        
+        // 애니메이션 상태
+        let isAnimating = false;
+        let animationProgress = 0;
+        let impactHole = null; // 충격파/땅꺼짐 정보 { radius, depth, visRadius, visDepth }
+
+        // UI 이벤트
+        massInput.addEventListener('input', (e) => massVal.textContent = `${e.target.value} 톤`);
+        speedInput.addEventListener('input', (e) => speedVal.textContent = `마하 ${e.target.value}`);
+
+        fireBtn.addEventListener('click', startSimulation);
+
+        function calculateImpact(massTon, machSpeed) {
+            const massKg = massTon * 1000;
+            const speedMS = machSpeed * MACH_1_IN_MS;
+            
+            // Kinetic Energy = 0.5 * m * v^2
+            const energyJoules = 0.5 * massKg * Math.pow(speedMS, 2);
+
+            // [수정된 부분] 비례 계산 방식
+            // 최소 상태 (10톤, 마하 1) 대비 비례 증가하도록 산출
+            // 깊이: 최소 약 1.5m ~ 최대 약 200m 이상 비례 증가
+            // 반경: 깊이의 약 2.5배
+            const craterDepth = (energyJoules / 500000000); 
+            const craterRadius = craterDepth * 2.5;
+
+            // 시각적 비례 스케일링 (화면 비주얼용)
+            // 무게(10~100)와 속도(1~25)의 곱/제곱에 직접 비례하게 조절
+            const maxEnergy = 0.5 * (100 * 1000) * Math.pow(25 * MACH_1_IN_MS, 2);
+            const energyRatio = energyJoules / maxEnergy; // 0.0001 ~ 1.0
+
+            // 화면상 땅꺼짐 시각적 최소/최대 크기 (픽셀)
+            const visRadius = 4 + (energyRatio * 120); // 에너지에 따라 4px ~ 124px까지 커짐
+            const visDepth = 2 + (energyRatio * 60);   // 에너지에 따라 2px ~ 62px까지 깊어짐
+
+            return {
+                speedMS,
+                energyJoules,
+                craterDepth,
+                craterRadius,
+                visRadius,
+                visDepth
+            };
+        }
+
+        function startSimulation() {
+            if (isAnimating) return;
+
+            const mass = parseFloat(massInput.value);
+            const mach = parseFloat(speedInput.value);
+
+            // 물리 결과 계산
+            const impactResult = calculateImpact(mass, mach);
+
+            // 결과 표시
+            resSpeed.textContent = `${Math.round(impactResult.speedMS).toLocaleString()} m/s`;
+            
+            if (impactResult.energyJoules >= 1e12) {
+                resEnergy.textContent = `${(impactResult.energyJoules / 1e12).toFixed(2)} TJ`;
+            } else if (impactResult.energyJoules >= 1e9) {
+                resEnergy.textContent = `${(impactResult.energyJoules / 1e9).toFixed(2)} GJ`;
+            } else {
+                resEnergy.textContent = `${(impactResult.energyJoules / 1e6).toFixed(2)} MJ`;
+            }
+
+            resDepth.textContent = `${impactResult.craterDepth.toFixed(2)} m`;
+            resRadius.textContent = `${impactResult.craterRadius.toFixed(2)} m`;
+
+            // 애니메이션 초기화
+            isAnimating = true;
+            animationProgress = 0;
+            impactHole = null;
+            fireBtn.disabled = true;
+
+            // 시뮬레이션 루프 실행
+            const duration = Math.max(1.5, 4 - (mach / 10)); // 마하가 높을수록 빠름
+            const startTime = performance.now();
+
+            function animate(currentTime) {
+                const elapsedTime = (currentTime - startTime) / 1000;
+                animationProgress = Math.min(elapsedTime / duration, 1);
+
+                drawScene(animationProgress, impactResult);
+
+                if (animationProgress < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    isAnimating = false;
+                    fireBtn.disabled = false;
+                    // 충돌 완료 후 땅꺼짐 시각화 유지
+                    impactHole = {
+                        visRadius: impactResult.visRadius,
+                        visDepth: impactResult.visDepth
+                    };
+                    drawScene(1, impactResult);
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        function drawScene(progress, currentImpact = null) {
+            const width = canvas.width;
+            const height = canvas.height;
+
+            const padding = 60;
+            const startX = padding;
+            const endX = width - padding;
+            const groundY = height - 60;
+            const maxHeight = 250; // 최대 포물선 높이 (캔버스 피셀 기준)
+
+            // 1. 배경 클리어
+            ctx.clearRect(0, 0, width, height);
+
+            // 2. 그리드 및 축 (좌표계)
+            ctx.strokeStyle = '#2a2a2a';
+            ctx.lineWidth = 1;
+
+            // 세로 격자 (변위)
+            for (let x = padding; x <= width - padding; x += (width - 2 * padding) / 5) {
+                ctx.beginPath();
+                ctx.moveTo(x, 20);
+                ctx.lineTo(x, groundY);
+                ctx.stroke();
+            }
+
+            // 가로 격자 (고도)
+            for (let y = groundY; y >= 20; y -= 60) {
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(width - padding, y);
+                ctx.stroke();
+            }
+
+            // 축 라벨 표시
+            ctx.fillStyle = '#888';
+            ctx.font = '12px sans-serif';
+
+            // X축 라벨 (변위: 0 ~ 10,000 km)
+            for (let i = 0; i <= 5; i++) {
+                const xPos = startX + (endX - startX) * (i / 5);
+                const kmValue = (TARGET_DISTANCE_KM * (i / 5)).toLocaleString();
+                ctx.fillText(`${kmValue} km`, xPos - 20, groundY + 20);
+            }
+            ctx.fillText("변위 (Distance)", width / 2 - 40, height - 15);
+
+            // Y축 라벨 (높이/고도)
+            ctx.fillText("고도 (Altitude)", 10, 20);
+            ctx.fillText("0 km", 15, groundY);
+            ctx.fillText("1,000 km", 15, groundY - maxHeight / 2);
+            ctx.fillText("2,000 km", 15, groundY - maxHeight);
+
+            // 3. 지형 (땅) 그리기
+            ctx.fillStyle = '#3e2723';
+            ctx.beginPath();
+            ctx.rect(0, groundY, width, height - groundY);
+            ctx.fill();
+
+            // 지표면 선
+            ctx.strokeStyle = '#4caf50';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, groundY);
+            ctx.lineTo(width, groundY);
+            ctx.stroke();
+
+            // 4. 발사대 및 목표 지점 표시
+            // 발사 지점 (0km)
+            ctx.fillStyle = '#00e676';
+            ctx.fillRect(startX - 5, groundY - 10, 10, 10);
+
+            // 타겟 지점 (10,000km)
+            ctx.fillStyle = '#ff5252';
+            ctx.beginPath();
+            ctx.arc(endX, groundY, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 5. 궤적선 (포물선)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(startX, groundY);
+            
+            // Quadratic Curve
+            const controlX = (startX + endX) / 2;
+            const controlY = groundY - (maxHeight * 2); 
+            ctx.quadraticCurveTo(controlX, controlY, endX, groundY);
+            ctx.stroke();
+            ctx.setLineDash([]); // 점선 해제
+
+            // 6. 미사일 위치 계산 (Bezier Quadratic Curve 공식)
+            const t = progress;
+            const curX = (1 - t) * (1 - t) * startX + 2 * (1 - t) * t * controlX + t * t * endX;
+            const curY = (1 - t) * (1 - t) * groundY + 2 * (1 - t) * t * controlY + t * t * groundY;
+
+            // 지나온 궤적 그리기 (실선)
+            if (t > 0) {
+                ctx.strokeStyle = '#ffeb3b';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(startX, groundY);
+                
+                // 현재 진행률까지의 궤적 세그먼트 그리기
+                for (let i = 0; i <= t; i += 0.01) {
+                    const ix = (1 - i) * (1 - i) * startX + 2 * (1 - i) * i * controlX + i * i * endX;
+                    const iy = (1 - i) * (1 - i) * groundY + 2 * (1 - i) * i * controlY + i * i * groundY;
+                    ctx.lineTo(ix, iy);
+                }
+                ctx.stroke();
+            }
+
+            // 7. 미사일 및 화염 연출
+            if (t < 1) {
+                // 미사일 방향 접선 각도 계산
+                const dx = 2 * (1 - t) * (controlX - startX) + 2 * t * (endX - controlX);
+                const dy = 2 * (1 - t) * (controlY - groundY) + 2 * t * (groundY - controlY);
+                const angle = Math.atan2(dy, dx);
+
+                ctx.save();
+                ctx.translate(curX, curY);
+                ctx.rotate(angle);
+
+                // 미사일 추진 불꽃
+                ctx.fillStyle = '#ff5722';
+                ctx.beginPath();
+                ctx.moveTo(-12, 0);
+                ctx.lineTo(-22, -4);
+                ctx.lineTo(-30, 0);
+                ctx.lineTo(-22, 4);
+                ctx.closePath();
+                ctx.fill();
+
+                // 미사일 탄두
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(-10, -3, 20, 6);
+                ctx.fillStyle = '#ff5252';
+                ctx.beginPath();
+                ctx.arc(10, 0, 3, -Math.PI / 2, Math.PI / 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+
+            // 8. 충돌 위치 땅꺼짐(Crater) 및 폭발 연출
+            if ((t >= 1 || impactHole) && (currentImpact || impactHole)) {
+                const visRadius = impactHole ? impactHole.visRadius : currentImpact.visRadius;
+                const visDepth = impactHole ? impactHole.visDepth : currentImpact.visDepth;
+
+                // 땅꺼짐(구덩이) 파내기 렌더링
+                ctx.fillStyle = '#121212'; // 배경 색상으로 덮어서 땅 패임 효과
+                ctx.beginPath();
+                ctx.ellipse(endX, groundY, visRadius, visDepth, 0, 0, Math.PI);
+                ctx.fill();
+
+                // 파인 테두리 선
+                ctx.strokeStyle = '#ff9800';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // 충돌 순간 섬광 및 화염 폭발 연출 (무게/속도에 따라 크기 비례)
+                if (progress === 1 && isAnimating) {
+                    ctx.fillStyle = 'rgba(255, 87, 34, 0.7)';
+                    ctx.beginPath();
+                    ctx.arc(endX, groundY, visRadius * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.fillStyle = 'rgba(255, 235, 59, 0.9)';
+                    ctx.beginPath();
+                    ctx.arc(endX, groundY, visRadius * 0.8, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        // 초기 화면 그리기
+        drawScene(0);
+    </script>
+</body>
+</html>
